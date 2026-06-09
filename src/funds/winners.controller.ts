@@ -7,7 +7,7 @@ class DrawWinnersDto {
   @IsInt() @Min(1) slots: number; // 当選枠（winner_slots）
 }
 
-@Controller('funds')
+@Controller('winners')
 export class WinnersController {
   constructor(private readonly winners: WinnersService) {}
 
