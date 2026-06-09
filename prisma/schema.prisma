@@ -1,0 +1,212 @@
+// Catcheez — Prisma schema（M2 で使用。M1 は in-memory なので未使用）
+// 方針: チェーンがソースオブトゥルース、DB はインデックス/キャッシュ。
+// 使い方(M2): npm i -D prisma && npm i @prisma/client && npx prisma migrate dev
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum FundStatus {
+  draft
+  open
+  locked
+  refunded
+  lottery
+  distributed
+  trading
+  graduated
+}
+
+enum TradeSide {
+  buy
+  sell
+}
+
+enum LotteryResult {
+  win
+  lose
+}
+
+model User {
+  id        String   @id @default(cuid())
+  wallet    String   @unique
+  handle    String?
+  createdAt DateTime @default(now())
+
+  tickets        Ticket[]
+  trades         Trade[]
+  holdings       Holding[]
+  wallet_        Wallet?
+  referralsMade  Referral[] @relation("referrer")
+  points         Point[]
+  votes          GovernanceVote[]
+}
+
+model Fund {
+  id           String     @id @default(cuid())
+  ticker       String     @unique
+  name         String
+  color        String?
+  goalUsdc     Decimal    @db.Decimal(18, 6)
+  raisedUsdc   Decimal    @default(0) @db.Decimal(18, 6)
+  deadline     DateTime
+  status       FundStatus @default(draft)
+  scheduleJson Json?
+  onchainAddr  String?
+  createdAt    DateTime   @default(now())
+
+  cards     FundCard[]
+  tickets   Ticket[]
+  lotteries Lottery[]
+  token     Token?
+}
+
+model FundCard {
+  id          String   @id @default(cuid())
+  fundId      String
+  idx         Int
+  name        String
+  grade       String?
+  refValueUsd Decimal? @db.Decimal(18, 2)
+  isMystery   Boolean  @default(false)
+  revealAt    DateTime?
+  imageUrl    String?
+
+  fund Fund @relation(fields: [fundId], references: [id])
+
+  @@unique([fundId, idx])
+}
+
+model Ticket {
+  id        String   @id @default(cuid())
+  fundId    String
+  userId    String
+  tier      String
+  qty       Int
+  entries   Int
+  paidUsdc  Decimal  @db.Decimal(18, 6)
+  isNft     Boolean  @default(false)
+  mintAddr  String?
+  createdAt DateTime @default(now())
+
+  fund    Fund            @relation(fields: [fundId], references: [id])
+  user    User            @relation(fields: [userId], references: [id])
+  results LotteryResultRow[]
+}
+
+model Lottery {
+  id            String   @id @default(cuid())
+  fundId        String
+  vrfRequest    String?
+  vrfProof      String?
+  txSig         String?
+  winRate       Float?
+  participants  Int?
+  winnersCount  Int?
+  drawnAt       DateTime?
+
+  fund    Fund               @relation(fields: [fundId], references: [id])
+  results LotteryResultRow[]
+}
+
+model LotteryResultRow {
+  id           String        @id @default(cuid())
+  lotteryId    String
+  ticketId     String
+  ticketNo     String
+  result       LotteryResult
+  awardedCard  String?
+  refundedUsdc Decimal?      @db.Decimal(18, 6)
+
+  lottery Lottery @relation(fields: [lotteryId], references: [id])
+  ticket  Ticket  @relation(fields: [ticketId], references: [id])
+}
+
+model Token {
+  id         String   @id @default(cuid())
+  ticker     String   @unique
+  fundId     String?  @unique
+  supply     Decimal? @db.Decimal(38, 0)
+  mcap       Decimal? @db.Decimal(18, 6)
+  price      Decimal? @db.Decimal(18, 6)
+  change24h  Float?
+  holders    Int      @default(0)
+  curveState Json?
+  graduated  Boolean  @default(false)
+
+  fund   Fund?     @relation(fields: [fundId], references: [id])
+  trades Trade[]
+  holdingRows Holding[]
+}
+
+model Trade {
+  id        String    @id @default(cuid())
+  tokenId   String
+  userId    String
+  side      TradeSide
+  amount    Decimal   @db.Decimal(38, 0)
+  price     Decimal   @db.Decimal(18, 6)
+  fee       Decimal   @db.Decimal(18, 6)
+  txSig     String?
+  createdAt DateTime  @default(now())
+
+  token Token @relation(fields: [tokenId], references: [id])
+  user  User  @relation(fields: [userId], references: [id])
+}
+
+model Holding {
+  userId  String
+  tokenId String
+  amount  Decimal @db.Decimal(38, 0)
+  avgCost Decimal @db.Decimal(18, 6)
+
+  user  User  @relation(fields: [userId], references: [id])
+  token Token @relation(fields: [tokenId], references: [id])
+
+  @@id([userId, tokenId])
+}
+
+model Wallet {
+  userId       String  @id
+  usdcBalance  Decimal @default(0) @db.Decimal(18, 6)
+  cheezBalance Decimal @default(0) @db.Decimal(18, 6)
+
+  user User @relation(fields: [userId], references: [id])
+}
+
+model Referral {
+  id         String   @id @default(cuid())
+  referrerId String
+  refereeWallet String
+  createdAt  DateTime @default(now())
+
+  referrer User @relation("referrer", fields: [referrerId], references: [id])
+}
+
+model Point {
+  id     String @id @default(cuid())
+  season String
+  userId String
+  points Int    @default(0)
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@unique([season, userId])
+}
+
+model GovernanceVote {
+  id         String   @id @default(cuid())
+  proposalId String
+  userId     String
+  optionId   String
+  createdAt  DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@unique([proposalId, userId])
+}

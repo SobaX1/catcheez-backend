@@ -1,0 +1,124 @@
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { randomBytes, randomUUID } from 'crypto';
+import { DbService } from '../db/db.service';
+import { TIERS } from '../seed/seed.data';
+
+@Injectable()
+export class FundsService {
+  constructor(private readonly db: DbService) {}
+
+  private summary(f: any) {
+    return {
+      ticker: f.ticker, name: f.name, color: f.color, status: f.status,
+      goalUsdc: f.goal_usdc, raisedUsdc: f.raised_usdc, pct: f.pct,
+      minTicket: f.min_ticket, deadline: f.deadline, deadlineText: f.deadline_text,
+      holders: f.holders, cardCount: f.card_count,
+    };
+  }
+
+  list() {
+    const funds = this.db.all(`SELECT * FROM fund ORDER BY rowid`).map((f) => this.summary(f));
+    return { funds, tiers: TIERS };
+  }
+
+  detail(ticker: string) {
+    const f = this.requireFund(ticker);
+    return { ...this.summary(f), backingTotal: f.raised_usdc, durationDays: f.duration_days, tiers: TIERS };
+  }
+
+  cards(ticker: string) {
+    const f = this.requireFund(ticker);
+    const now = Date.now();
+    const rows = this.db.all(`SELECT * FROM fund_card WHERE fund_ticker=? ORDER BY idx`, [f.ticker]);
+    const cards = rows.map((c) => {
+      const revealed = !c.is_mystery || (c.reveal_at && new Date(c.reveal_at).getTime() <= now);
+      return revealed
+        ? { idx: c.idx, name: c.name, grade: c.grade, refValue: c.ref_value, art: c.art, isMystery: !!c.is_mystery, revealAt: c.reveal_at, imageUrl: null }
+        : { idx: c.idx, isMystery: true, revealAt: c.reveal_at };
+    });
+    return { ticker: f.ticker, cards };
+  }
+
+  schedule(ticker: string) {
+    const f = this.requireFund(ticker);
+    return {
+      ticker: f.ticker,
+      steps: [
+        { phase: 'Day 0', title: '募集開始', desc: `目標額 $${Number(f.goal_usdc).toLocaleString()} ＋ 募集期間 ${f.duration_days}日 をオンチェーン記録` },
+        { phase: `Day 0–${f.duration_days}`, title: '応募期間', desc: 'USDC でチケット購入。達成率を集計' },
+        { phase: '締切', title: '達成判定', desc: '達成 → ロック（mcap = raised = backing）／未達 → 全員に全額返金' },
+        { phase: '+72h', title: 'VRF抽選', desc: 'Switchboard VRF で当選確定。倍率 = チケット × 紹介 × ランク' },
+        { phase: '抽選後', title: '配布・返金', desc: '当選 → pNFT/ファンドトークン配布、落選 → 全額返金 ＋ 次回ボーナス' },
+        { phase: '随時', title: 'セカンダリ', desc: 'ボンディングカーブ取引 → 卒業 → Jupiter/Magic Eden、物理カード償還(2%)' },
+      ],
+    };
+  }
+
+  apply(ticker: string, tierId: string, qty: number, userId: string) {
+    const f = this.requireFund(ticker);
+    if (f.status !== 'open') throw new BadRequestException(`ファンドは募集中ではありません（status=${f.status}）`);
+    const tier = TIERS.find((t) => t.id === tierId);
+    if (!tier) throw new BadRequestException(`不明なティア: ${tierId}`);
+    if (!Number.isInteger(qty) || qty < 1) throw new BadRequestException('qty は1以上の整数');
+
+    const paidUsdc = qty * tier.price;
+    const w = this.wallet(userId);
+    if (w.usdc < paidUsdc) throw new BadRequestException(`USDC残高不足（必要 $${paidUsdc} / 残高 $${w.usdc}）`);
+
+    const entries = qty * tier.mult;
+    const prefix = f.ticker[0];
+    const ticketNumbers = Array.from({ length: qty }, () => `${prefix}-${Math.floor(1000 + Math.random() * 8999)}`);
+    const newUsdc = Math.round((w.usdc - paidUsdc) * 100) / 100;
+    const raised = f.raised_usdc + paidUsdc;
+    const pct = Math.min(999, Math.round((raised / f.goal_usdc) * 100));
+    const status = raised >= f.goal_usdc ? 'locked' : f.status;
+
+    this.db.run(`UPDATE wallet SET usdc=? WHERE user_id=?`, [newUsdc, userId]);
+    this.db.run(`UPDATE fund SET raised_usdc=?, pct=?, status=? WHERE ticker=?`, [raised, pct, status, f.ticker]);
+    this.db.run(
+      `INSERT INTO ticket(id,user_id,fund_ticker,tier,qty,entries,paid_usdc,ticket_numbers,is_nft,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)`,
+      [randomUUID(), userId, f.ticker, tierId, qty, entries, paidUsdc, JSON.stringify(ticketNumbers), 1, new Date().toISOString()],
+    );
+    this.db.run(`INSERT INTO txn(id,user_id,type,detail,icon,amount,up,created_at) VALUES(?,?,?,?,?,?,?,?)`,
+      [randomUUID(), userId, 'チケット購入', `${f.name} · ${qty}枚`, 'buy', -paidUsdc, 0, new Date().toISOString()]);
+    this.db.save();
+
+    const ticket = { fundTicker: f.ticker, tier: tierId, qty, entries, paidUsdc, ticketNumbers, isNft: true };
+    return { ticket, fund: this.summary(this.requireFund(ticker)), wallet: { usdcBalance: newUsdc, cheezBalance: w.cheez } };
+  }
+
+  draw(ticker: string) {
+    const f = this.requireFund(ticker);
+    const row = this.db.get(`SELECT result_json FROM lottery WHERE fund_ticker=?`, [f.ticker]);
+    if (!row) throw new BadRequestException('このファンドに抽選データがありません');
+    const proof = {
+      vrfRequest: 'vrf_' + randomBytes(8).toString('hex'),
+      vrfProof: '0x' + randomBytes(32).toString('hex'),
+      txSig: randomBytes(32).toString('base64url'),
+      drawnAt: new Date().toISOString(),
+      verifyUrl: `https://explorer.solana.com/tx/MOCK_${f.ticker}`,
+      note: 'M2: 擬似VRF。M3 で Switchboard VRF コールバックに置換（改変不能・検証可能）',
+    };
+    this.db.run(`UPDATE lottery SET proof_json=? WHERE fund_ticker=?`, [JSON.stringify(proof), f.ticker]);
+    this.db.run(`UPDATE fund SET status='distributed' WHERE ticker=?`, [f.ticker]);
+    this.db.save();
+    return { ticker: f.ticker, proof, result: JSON.parse(row.result_json) };
+  }
+
+  lottery(ticker: string) {
+    const f = this.requireFund(ticker);
+    const row = this.db.get(`SELECT proof_json, result_json FROM lottery WHERE fund_ticker=?`, [f.ticker]);
+    if (!row) throw new NotFoundException('抽選結果がまだありません');
+    return { ticker: f.ticker, proof: row.proof_json ? JSON.parse(row.proof_json) : null, result: JSON.parse(row.result_json) };
+  }
+
+  private wallet(userId: string) {
+    const w = this.db.get(`SELECT usdc, cheez FROM wallet WHERE user_id=?`, [userId]);
+    return w || { usdc: 0, cheez: 0 };
+  }
+  private requireFund(ticker: string) {
+    const f = this.db.get(`SELECT * FROM fund WHERE ticker=? COLLATE NOCASE`, [ticker]);
+    if (!f) throw new NotFoundException(`ファンドが見つかりません: ${ticker}`);
+    return f;
+  }
+}
