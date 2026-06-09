@@ -1,0 +1,890 @@
+{
+  "address": "4FvdP49qLPjwmq4xCwSB58uSm1aVr6ASkWSLkQmkrmid",
+  "metadata": {
+    "name": "catcheez",
+    "version": "0.2.0",
+    "spec": "0.1.0",
+    "description": "Catcheez on-chain (fiction prototype)"
+  },
+  "instructions": [
+    {
+      "name": "initialize_fund",
+      "discriminator": [
+        212,
+        42,
+        24,
+        245,
+        146,
+        141,
+        78,
+        198
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "fund",
+          "writable": true
+        },
+        {
+          "name": "usdc_mint"
+        },
+        {
+          "name": "vault_authority"
+        },
+        {
+          "name": "prize_mint",
+          "writable": true
+        },
+        {
+          "name": "vault",
+          "writable": true
+        },
+        {
+          "name": "token_program"
+        },
+        {
+          "name": "system_program"
+        },
+        {
+          "name": "rent"
+        }
+      ],
+      "args": [
+        {
+          "name": "ticker",
+          "type": "string"
+        },
+        {
+          "name": "goal",
+          "type": "u64"
+        },
+        {
+          "name": "deadline",
+          "type": "i64"
+        },
+        {
+          "name": "winner_slots",
+          "type": "u32"
+        },
+        {
+          "name": "tiers",
+          "type": {
+            "array": [
+              {
+                "defined": {
+                  "name": "Tier"
+                }
+              },
+              3
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "buy_ticket",
+      "discriminator": [
+        11,
+        24,
+        17,
+        193,
+        168,
+        116,
+        164,
+        169
+      ],
+      "accounts": [
+        {
+          "name": "buyer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "fund",
+          "writable": true
+        },
+        {
+          "name": "ticket",
+          "writable": true
+        },
+        {
+          "name": "vault",
+          "writable": true
+        },
+        {
+          "name": "buyer_usdc",
+          "writable": true
+        },
+        {
+          "name": "token_program"
+        },
+        {
+          "name": "system_program"
+        }
+      ],
+      "args": [
+        {
+          "name": "tier_index",
+          "type": "u8"
+        },
+        {
+          "name": "qty",
+          "type": "u32"
+        }
+      ]
+    },
+    {
+      "name": "settle",
+      "discriminator": [
+        175,
+        42,
+        185,
+        87,
+        144,
+        131,
+        102,
+        212
+      ],
+      "accounts": [
+        {
+          "name": "fund",
+          "writable": true
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "submit_randomness",
+      "discriminator": [
+        196,
+        216,
+        74,
+        181,
+        189,
+        211,
+        16,
+        87
+      ],
+      "accounts": [
+        {
+          "name": "oracle",
+          "signer": true
+        },
+        {
+          "name": "fund",
+          "writable": true
+        }
+      ],
+      "args": [
+        {
+          "name": "seed",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "post_winners_root",
+      "discriminator": [
+        78,
+        36,
+        249,
+        145,
+        36,
+        189,
+        152,
+        221
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "signer": true
+        },
+        {
+          "name": "fund",
+          "writable": true
+        }
+      ],
+      "args": [
+        {
+          "name": "root",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "claim_prize",
+      "discriminator": [
+        157,
+        233,
+        139,
+        121,
+        246,
+        62,
+        234,
+        235
+      ],
+      "accounts": [
+        {
+          "name": "owner",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "fund"
+        },
+        {
+          "name": "ticket",
+          "writable": true
+        },
+        {
+          "name": "vault_authority"
+        },
+        {
+          "name": "prize_mint",
+          "writable": true
+        },
+        {
+          "name": "owner_prize",
+          "writable": true
+        },
+        {
+          "name": "token_program"
+        }
+      ],
+      "args": [
+        {
+          "name": "proof",
+          "type": {
+            "vec": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "claim_refund",
+      "discriminator": [
+        15,
+        16,
+        30,
+        161,
+        255,
+        228,
+        97,
+        60
+      ],
+      "accounts": [
+        {
+          "name": "owner",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "fund"
+        },
+        {
+          "name": "ticket",
+          "writable": true
+        },
+        {
+          "name": "vault_authority"
+        },
+        {
+          "name": "vault",
+          "writable": true
+        },
+        {
+          "name": "owner_usdc",
+          "writable": true
+        },
+        {
+          "name": "token_program"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "set_oracle",
+      "discriminator": [
+        186,
+        128,
+        81,
+        104,
+        74,
+        79,
+        18,
+        224
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "signer": true
+        },
+        {
+          "name": "fund",
+          "writable": true
+        }
+      ],
+      "args": [
+        {
+          "name": "new_oracle",
+          "type": "pubkey"
+        }
+      ]
+    }
+  ],
+  "accounts": [
+    {
+      "name": "Fund",
+      "discriminator": [
+        62,
+        128,
+        183,
+        208,
+        91,
+        31,
+        212,
+        209
+      ]
+    },
+    {
+      "name": "Ticket",
+      "discriminator": [
+        41,
+        228,
+        24,
+        165,
+        78,
+        90,
+        235,
+        200
+      ]
+    }
+  ],
+  "events": [
+    {
+      "name": "FundInitialized",
+      "discriminator": [
+        253,
+        64,
+        136,
+        81,
+        179,
+        19,
+        1,
+        155
+      ]
+    },
+    {
+      "name": "TicketBought",
+      "discriminator": [
+        80,
+        244,
+        35,
+        181,
+        211,
+        143,
+        3,
+        166
+      ]
+    },
+    {
+      "name": "Settled",
+      "discriminator": [
+        232,
+        210,
+        40,
+        17,
+        142,
+        124,
+        145,
+        238
+      ]
+    },
+    {
+      "name": "Drawn",
+      "discriminator": [
+        87,
+        120,
+        94,
+        189,
+        167,
+        148,
+        44,
+        221
+      ]
+    },
+    {
+      "name": "WinnersRootPosted",
+      "discriminator": [
+        35,
+        64,
+        97,
+        16,
+        245,
+        227,
+        255,
+        172
+      ]
+    },
+    {
+      "name": "Claimed",
+      "discriminator": [
+        217,
+        192,
+        123,
+        72,
+        108,
+        150,
+        248,
+        33
+      ]
+    }
+  ],
+  "errors": [
+    {
+      "code": 6000,
+      "name": "TickerTooLong",
+      "msg": "TickerTooLong"
+    },
+    {
+      "code": 6001,
+      "name": "InvalidParam",
+      "msg": "InvalidParam"
+    },
+    {
+      "code": 6002,
+      "name": "DeadlineInPast",
+      "msg": "DeadlineInPast"
+    },
+    {
+      "code": 6003,
+      "name": "NotOpen",
+      "msg": "NotOpen"
+    },
+    {
+      "code": 6004,
+      "name": "DeadlinePassed",
+      "msg": "DeadlinePassed"
+    },
+    {
+      "code": 6005,
+      "name": "DeadlineNotReached",
+      "msg": "DeadlineNotReached"
+    },
+    {
+      "code": 6006,
+      "name": "NotLocked",
+      "msg": "NotLocked"
+    },
+    {
+      "code": 6007,
+      "name": "DrawNotReady",
+      "msg": "DrawNotReady"
+    },
+    {
+      "code": 6008,
+      "name": "NotDrawn",
+      "msg": "NotDrawn"
+    },
+    {
+      "code": 6009,
+      "name": "RandomnessMismatch",
+      "msg": "RandomnessMismatch"
+    },
+    {
+      "code": 6010,
+      "name": "StaleRandomness",
+      "msg": "StaleRandomness"
+    },
+    {
+      "code": 6011,
+      "name": "BadRandomness",
+      "msg": "BadRandomness"
+    },
+    {
+      "code": 6012,
+      "name": "RandomnessNotReady",
+      "msg": "RandomnessNotReady"
+    },
+    {
+      "code": 6013,
+      "name": "RootNotPosted",
+      "msg": "RootNotPosted"
+    },
+    {
+      "code": 6014,
+      "name": "InvalidProof",
+      "msg": "InvalidProof"
+    },
+    {
+      "code": 6015,
+      "name": "Unauthorized",
+      "msg": "Unauthorized"
+    },
+    {
+      "code": 6016,
+      "name": "NotClaimable",
+      "msg": "NotClaimable"
+    },
+    {
+      "code": 6017,
+      "name": "AlreadyClaimed",
+      "msg": "AlreadyClaimed"
+    },
+    {
+      "code": 6018,
+      "name": "MathOverflow",
+      "msg": "MathOverflow"
+    }
+  ],
+  "types": [
+    {
+      "name": "Tier",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "price",
+            "type": "u64"
+          },
+          {
+            "name": "mult",
+            "type": "u16"
+          }
+        ]
+      }
+    },
+    {
+      "name": "FundStatus",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Open"
+          },
+          {
+            "name": "Locked"
+          },
+          {
+            "name": "Refunding"
+          },
+          {
+            "name": "Drawn"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Fund",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "oracle",
+            "type": "pubkey"
+          },
+          {
+            "name": "usdc_mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "prize_mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "vault",
+            "type": "pubkey"
+          },
+          {
+            "name": "ticker",
+            "type": "string"
+          },
+          {
+            "name": "goal",
+            "type": "u64"
+          },
+          {
+            "name": "deadline",
+            "type": "i64"
+          },
+          {
+            "name": "draw_at",
+            "type": "i64"
+          },
+          {
+            "name": "raised",
+            "type": "u64"
+          },
+          {
+            "name": "total_entries",
+            "type": "u64"
+          },
+          {
+            "name": "winner_slots",
+            "type": "u32"
+          },
+          {
+            "name": "tiers",
+            "type": {
+              "array": [
+                {
+                  "defined": {
+                    "name": "Tier"
+                  }
+                },
+                3
+              ]
+            }
+          },
+          {
+            "name": "status",
+            "type": {
+              "defined": {
+                "name": "FundStatus"
+              }
+            }
+          },
+          {
+            "name": "randomness",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "randomness_account",
+            "type": "pubkey"
+          },
+          {
+            "name": "commit_slot",
+            "type": "u64"
+          },
+          {
+            "name": "winners_root",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          },
+          {
+            "name": "vault_auth_bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Ticket",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "fund",
+            "type": "pubkey"
+          },
+          {
+            "name": "entries",
+            "type": "u64"
+          },
+          {
+            "name": "paid",
+            "type": "u64"
+          },
+          {
+            "name": "won",
+            "type": "bool"
+          },
+          {
+            "name": "settled",
+            "type": "bool"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "FundInitialized",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "fund",
+            "type": "pubkey"
+          },
+          {
+            "name": "ticker",
+            "type": "string"
+          },
+          {
+            "name": "goal",
+            "type": "u64"
+          },
+          {
+            "name": "deadline",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "TicketBought",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "fund",
+            "type": "pubkey"
+          },
+          {
+            "name": "owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "entries",
+            "type": "u64"
+          },
+          {
+            "name": "amount",
+            "type": "u64"
+          },
+          {
+            "name": "raised",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Settled",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "fund",
+            "type": "pubkey"
+          },
+          {
+            "name": "status",
+            "type": {
+              "defined": {
+                "name": "FundStatus"
+              }
+            }
+          },
+          {
+            "name": "raised",
+            "type": "u64"
+          },
+          {
+            "name": "goal",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Drawn",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "fund",
+            "type": "pubkey"
+          },
+          {
+            "name": "randomness",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "WinnersRootPosted",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "fund",
+            "type": "pubkey"
+          },
+          {
+            "name": "root",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "Claimed",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "fund",
+            "type": "pubkey"
+          },
+          {
+            "name": "owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "won",
+            "type": "bool"
+          },
+          {
+            "name": "refunded",
+            "type": "u64"
+          }
+        ]
+      }
+    }
+  ]
+}

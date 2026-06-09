@@ -34,6 +34,28 @@ export class MeService {
     return { tickets };
   }
 
+  // ティア別の保有チケット枚数（IPO中は価格が無いので枚数で表示）。
+  ticketHoldings(userId: string) {
+    const rows = this.db.all(
+      `SELECT tier, SUM(qty) q, SUM(entries) e, SUM(paid_usdc) paid FROM ticket WHERE user_id=? GROUP BY tier`, [userId]);
+    const byTier: { silver: number; gold: number; rainbow: number } = { silver: 0, gold: 0, rainbow: 0 };
+    let entries = 0, paid = 0;
+    for (const r of rows) {
+      const t = String(r.tier || '').toLowerCase();
+      if ((byTier as any)[t] != null) (byTier as any)[t] = Number(r.q) || 0;
+      entries += Number(r.e) || 0; paid += Number(r.paid) || 0;
+    }
+    const funds = this.db.all(`SELECT DISTINCT fund_ticker FROM ticket WHERE user_id=?`, [userId]).map((r) => r.fund_ticker);
+    return {
+      byTier,
+      totalTickets: byTier.silver + byTier.gold + byTier.rainbow,
+      entries,
+      paidUsdc: Math.round(paid * 100) / 100,
+      activeIpos: funds.length,
+      funds,
+    };
+  }
+
   transactions(userId: string) {
     const transactions = this.db.all(`SELECT * FROM txn WHERE user_id=? ORDER BY created_at DESC`, [userId]).map((x) => ({
       type: x.type, detail: x.detail, icon: x.icon, amount: x.amount, up: !!x.up,

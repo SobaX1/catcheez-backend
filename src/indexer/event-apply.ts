@@ -37,6 +37,23 @@ export function applyEvent(db: DbService, name: string, data: any): { name: stri
       const raised = USDC(data.raised);
       const pct = f.goal_usdc > 0 ? Math.min(999, Math.round((raised / f.goal_usdc) * 100)) : 0;
       db.run(`UPDATE fund SET raised_usdc=?, pct=? WHERE ticker=?`, [raised, pct, f.ticker]);
+      // owner→user（無ければ作成）し、amount/entries からティアを逆算してチケットを記録
+      try {
+        const owner = data.owner;
+        if (owner) {
+          let u = db.get(`SELECT id FROM app_user WHERE wallet=?`, [owner]);
+          if (!u) {
+            const uid = 'usr_' + Math.random().toString(36).slice(2, 10);
+            db.run(`INSERT INTO app_user(id,wallet,handle,created_at) VALUES(?,?,?,?)`,
+              [uid, owner, short(owner), new Date().toISOString()]);
+            u = { id: uid };
+          }
+          const det = deriveTier(Number(data.amount), Number(data.entries));
+          db.run(`INSERT INTO ticket(id,user_id,fund_ticker,tier,qty,entries,paid_usdc,ticket_numbers,is_nft,created_at)
+                  VALUES(?,?,?,?,?,?,?,?,?,?)`,
+            [rid(), u.id, f.ticker, det.tier, det.qty, Number(data.entries), USDC(data.amount), '[]', 1, new Date().toISOString()]);
+        }
+      } catch (e) { /* ティア記録の失敗は調達額更新を妨げない */ }
       return { name, effect: `${f.ticker} raised=${raised} pct=${pct}` };
     }
     case 'Settled': {
@@ -89,6 +106,23 @@ export function applyEvent(db: DbService, name: string, data: any): { name: stri
 
 function fundByAddr(db: DbService, addr: string) {
   return db.get(`SELECT * FROM fund WHERE onchain_addr=?`, [addr]);
+}
+
+// ティア定義（base 単位: USDC=6 decimals）。amount=price*qty, entries=mult*qty から一意に逆算できる。
+const TIERS = [
+  { tier: 'silver', price: 10_000_000, mult: 1 },
+  { tier: 'gold', price: 50_000_000, mult: 6 },
+  { tier: 'rainbow', price: 100_000_000, mult: 15 },
+];
+function deriveTier(amount: number, entries: number): { tier: string; qty: number } {
+  for (const t of TIERS) {
+    if (amount % t.price === 0) {
+      const qty = amount / t.price;
+      if (qty > 0 && entries === t.mult * qty) return { tier: t.tier, qty };
+    }
+  }
+  const t = TIERS.find((x) => entries % x.mult === 0) || TIERS[0];
+  return { tier: t.tier, qty: Math.max(1, Math.round(entries / t.mult)) };
 }
 function short(s: string) { return s ? s.slice(0, 4) + '…' + s.slice(-4) : '?'; }
 function rid() { return 'evt_' + Math.random().toString(36).slice(2, 10); }
