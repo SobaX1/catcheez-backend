@@ -1,19 +1,26 @@
-import { Injectable, OnModuleInit, Logger } from '@nestjs/common';
+import { Injectable, OnModuleInit, OnModuleDestroy, Logger } from '@nestjs/common';
 import { DbService } from '../db/db.service';
 import { applyEvent } from './event-apply';
 
 const EVENTS = ['FundInitialized', 'TicketBought', 'Settled', 'Drawn', 'WinnersRootPosted', 'Claimed'];
 
 /**
- * オンチェーンイベントの indexer。
- * - SOLANA_RPC + PROGRAM_ID + CATCHEEZ_IDL が揃えば Anchor で購読し DB を同期。
- * - 未設定 or @coral-xyz/anchor 未導入なら idle（ログのみ）。
- * - apply() はチェーン非依存の純粋ロジック（admin/テストから直接投入可能）。
+ * オンチェーンイベントの indexer（ポーリング方式）。
+ * 無料の公開RPCは WebSocket(logsSubscribe) の通知が届かないことがあるため、
+ * 定期的に getSignaturesForAddress で取引履歴を取得し、ログから Anchor イベントを
+ * 復元して DB に反映する。WebSocket(addEventListener) も併用するが、依存はしない。
+ * - SOLANA_RPC + PROGRAM_ID + CATCHEEZ_IDL が揃えば有効化。未設定なら idle。
  */
 @Injectable()
-export class IndexerService implements OnModuleInit {
+export class IndexerService implements OnModuleInit, OnModuleDestroy {
   private readonly log = new Logger('Indexer');
   private listeners: number[] = [];
+  private pollTimer: any = null;
+  private anchor: any = null;
+  private connection: any = null;
+  private program: any = null;
+  private programId = '';
+  private polling = false;
 
   constructor(private readonly db: DbService) {}
 
@@ -32,64 +39,128 @@ export class IndexerService implements OnModuleInit {
       return;
     }
     try {
-      // 動的 require: 未導入でもビルド/起動を妨げない（有効化時のみ必要）
       // eslint-disable-next-line @typescript-eslint/no-var-requires
       const anchor: any = require('@coral-xyz/anchor');
       const fs = require('fs');
       const idl = JSON.parse(fs.readFileSync(idlPath, 'utf-8'));
       const connection = new anchor.web3.Connection(rpc, 'confirmed');
       const provider = new anchor.AnchorProvider(connection, {} as any, { commitment: 'confirmed' });
-      // Anchor 0.30.1 は (idl, provider)。古い版は (idl, programId, provider)。両対応。
       let program: any;
       try { program = new anchor.Program(idl, provider); }
       catch (e) { program = new anchor.Program(idl, programId, provider); }
 
-      // ファンドは indexer 起動前に初期化済みのため、PDA を導出して onchain_addr を補完し、
-      // 現在の調達額をチェーンから読み込んでメーターを実態に合わせる（live イベント前のバックフィル）。
-      await this.syncFundsFromChain(anchor, connection, programId);
+      this.anchor = anchor;
+      this.connection = connection;
+      this.program = program;
+      this.programId = programId;
 
-      for (const ev of EVENTS) {
-        const id = program.addEventListener(ev, (data: any) => {
-          try {
-            const r = this.apply(ev, normalize(data));
-            this.log.log(`event ${ev}: ${r.effect}`);
-          } catch (e) {
-            this.log.error(`apply ${ev} failed: ${(e as Error).message}`);
-          }
-        });
-        this.listeners.push(id);
-      }
-      this.log.log(`indexer subscribed to ${programId} via ${rpc}`);
+      // 起動時: ファンドの PDA を補完し、現在の調達額をチェーンから読み込む
+      await this.syncFundsFromChain();
+      // 起動時: 直近の取引履歴から過去のイベント（過去の購入など）を取り込む
+      await this.indexRecentSignatures(60);
+
+      // WebSocket でも購読（届けば即時反映。届かなくてもポーリングが拾う）
+      try {
+        for (const ev of EVENTS) {
+          const id = program.addEventListener(ev, (data: any) => {
+            try { const r = this.apply(ev, normalize(data)); this.log.log(`event ${ev}: ${r.effect}`); }
+            catch (e) { this.log.error(`apply ${ev} failed: ${(e as Error).message}`); }
+          });
+          this.listeners.push(id);
+        }
+      } catch (e) { this.log.warn('addEventListener skipped: ' + (e as Error).message); }
+
+      // ポーリング開始（30秒ごとに 調達額 + 新規イベント を取得）
+      this.pollTimer = setInterval(() => { this.tick().catch(() => {}); }, 30000);
+      this.log.log(`indexer subscribed to ${programId} via ${rpc} (polling every 30s)`);
     } catch (e) {
       this.log.warn('indexer enable failed (install @coral-xyz/anchor?): ' + (e as Error).message);
     }
   }
 
-  /** 各 fund 行の PDA を導出して onchain_addr を補完し、現在の raised をチェーンから読んで反映。 */
-  private async syncFundsFromChain(anchor: any, connection: any, programId: string) {
+  async onModuleDestroy() {
+    if (this.pollTimer) clearInterval(this.pollTimer);
+    try { for (const id of this.listeners) await this.program?.removeEventListener(id); } catch (e) {}
+  }
+
+  private async tick() {
+    if (this.polling) return; // 前回の処理が走っていれば重ねない
+    this.polling = true;
     try {
-      const pk = new anchor.web3.PublicKey(programId);
-      const funds = this.db.all(`SELECT ticker, goal_usdc FROM fund`);
+      await this.syncFundsFromChain();
+      await this.indexRecentSignatures(30);
+    } finally { this.polling = false; }
+  }
+
+  /** 各 fund 行の PDA を導出して onchain_addr を補完し、現在の raised をチェーンから反映。 */
+  private async syncFundsFromChain() {
+    if (!this.anchor || !this.connection) return;
+    try {
+      const pk = new this.anchor.web3.PublicKey(this.programId);
+      const funds = this.db.all(`SELECT ticker, goal_usdc, raised_usdc FROM fund`);
       for (const f of funds) {
         try {
-          const [fundPda] = anchor.web3.PublicKey.findProgramAddressSync(
+          const [fundPda] = this.anchor.web3.PublicKey.findProgramAddressSync(
             [Buffer.from('fund'), Buffer.from(f.ticker)], pk);
           const addr = fundPda.toBase58();
           this.db.run(`UPDATE fund SET onchain_addr=? WHERE ticker=?`, [addr, f.ticker]);
-          const acc = await connection.getAccountInfo(fundPda);
+          const acc = await this.connection.getAccountInfo(fundPda);
           if (acc && acc.data) {
             const raised = decodeRaised(acc.data);
             if (raised != null) {
               const usdc = Math.round((raised / 1e6) * 100) / 100;
               const pct = f.goal_usdc > 0 ? Math.min(999, Math.round((usdc / f.goal_usdc) * 100)) : 0;
-              this.db.run(`UPDATE fund SET raised_usdc=?, pct=? WHERE ticker=?`, [usdc, pct, f.ticker]);
-              this.log.log(`backfill ${f.ticker}: raised=${usdc} pct=${pct} addr=${addr.slice(0, 4)}…`);
+              if (usdc !== f.raised_usdc) {
+                this.db.run(`UPDATE fund SET raised_usdc=?, pct=? WHERE ticker=?`, [usdc, pct, f.ticker]);
+                this.log.log(`backfill ${f.ticker}: raised=${usdc} pct=${pct} addr=${addr.slice(0, 4)}…`);
+              }
             }
           }
         } catch (inner) { this.log.warn(`sync ${f.ticker} failed: ${(inner as Error).message}`); }
       }
       this.db.save();
     } catch (e) { this.log.warn('syncFundsFromChain failed: ' + (e as Error).message); }
+  }
+
+  /** 直近 limit 件の取引を取得し、未処理のものからイベントを復元して反映。 */
+  private async indexRecentSignatures(limit: number) {
+    if (!this.anchor || !this.connection || !this.program) return;
+    try {
+      const pk = new this.anchor.web3.PublicKey(this.programId);
+      const sigInfos = await this.connection.getSignaturesForAddress(pk, { limit });
+      const ordered = sigInfos.slice().reverse(); // 古い順に処理
+      const parser = new this.anchor.EventParser(pk, this.program.coder);
+      let applied = 0;
+      for (const si of ordered) {
+        const sig = si.signature;
+        if (si.err) { this.markSeen(sig); continue; }
+        if (this.seen(sig)) continue;
+        let tx: any = null;
+        try {
+          tx = await this.connection.getTransaction(sig, { maxSupportedTransactionVersion: 0, commitment: 'confirmed' });
+        } catch (e) {}
+        const logs = tx && tx.meta && tx.meta.logMessages ? tx.meta.logMessages : null;
+        if (logs) {
+          try {
+            for (const ev of parser.parseLogs(logs)) {
+              // Anchor 0.30 の parseLogs は camelCase（ticketBought）で返すため PascalCase に補正
+              const evName = ev.name.charAt(0).toUpperCase() + ev.name.slice(1);
+              try { const r = this.apply(evName, normalize(ev.data)); applied++; this.log.log(`poll ${evName}: ${r.effect}`); }
+              catch (e) { this.log.error(`apply ${evName} failed: ${(e as Error).message}`); }
+            }
+          } catch (e) {}
+        }
+        this.markSeen(sig);
+      }
+      if (applied > 0) this.db.save();
+    } catch (e) { this.log.warn('indexRecentSignatures failed: ' + (e as Error).message); }
+  }
+
+  private seen(sig: string): boolean {
+    try { return !!this.db.get(`SELECT k FROM meta WHERE k=?`, ['evtsig:' + sig]); } catch (e) { return false; }
+  }
+  private markSeen(sig: string) {
+    try { this.db.run(`INSERT OR REPLACE INTO meta(k,v) VALUES(?,?)`, ['evtsig:' + sig, '1']); } catch (e) {}
   }
 }
 
