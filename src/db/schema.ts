@@ -129,4 +129,13 @@ CREATE TABLE IF NOT EXISTS meta (
   k TEXT PRIMARY KEY,
   v TEXT
 );
+CREATE TABLE IF NOT EXISTS winner (
+  fund_ticker TEXT NOT NULL,
+  owner       TEXT NOT NULL,
+  entries     INTEGER NOT NULL,
+  proof_json  TEXT NOT NULL,
+  root_hex    TEXT NOT NULL,
+  created_at  TEXT NOT NULL,
+  PRIMARY KEY (fund_ticker, owner)
+);
 `;
