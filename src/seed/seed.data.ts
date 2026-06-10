@@ -35,7 +35,7 @@ export interface SeedFund {
   status: string; cardCount: number; mysteryCount: number;
 }
 export const SEED_FUNDS: SeedFund[] = [
-  { ticker: 'AURUM', name: 'Aurum Genesis Vault', color: '#ffb300', goalUsdc: 240000, pct: 62, minTicket: 20, deadlineText: '残り 2日 18:42', durationDays: 14, holders: 128, status: 'open', cardCount: 10, mysteryCount: 5 },
+  { ticker: 'AURUM', name: 'Aurum Genesis Vault', color: '#ffb300', goalUsdc: 240000, pct: 62, minTicket: 20, deadlineText: '残り 2日 18:42', durationDays: 2, holders: 128, status: 'open', cardCount: 10, mysteryCount: 5 },
   { ticker: 'PSAX',  name: 'PSA10 Genesis Box',    color: '#7a6cff', goalUsdc: 180000, pct: 88, minTicket: 15, deadlineText: '残り 5時間 06:11', durationDays: 14, holders: 341, status: 'open', cardCount: 10, mysteryCount: 5 },
 ];
 
