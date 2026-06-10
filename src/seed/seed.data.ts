@@ -14,18 +14,19 @@ export const TIERS: Tier[] = [
 ];
 
 // 構成カード10枚テンプレ。idx<5 = ミステリー（残り5日から24hごとに1枚公開）。
+// Collector Crypt 系の実在グレーディング済みポケカを参照（参考価格は2026年相場の概算・フィクション用）。
 export interface CompCard { name: string; grade: string; refValue: string; art: string; }
 export const SEED_COMP: CompCard[] = [
-  { name: 'Genesis Holo', grade: 'PSA 10',  refValue: '$15,900', art: 'a' },
-  { name: 'Eclipse 1st',  grade: 'PSA 10',  refValue: '$3,500',  art: 'c' },
-  { name: 'Aurora Prime', grade: 'PSA 9.5', refValue: '$2,800',  art: 'b' },
-  { name: 'Nova Promo',   grade: 'PSA 10',  refValue: '$1,200',  art: 'd' },
-  { name: 'Halo Rare',    grade: 'PSA 10',  refValue: '$950',    art: 'e' },
-  { name: 'Ember Shine',  grade: 'PSA 9',   refValue: '$850',    art: 'a' },
-  { name: 'Solar Crest',  grade: 'PSA 10',  refValue: '$450',    art: 'c' },
-  { name: 'Lumen Arc',    grade: 'MANA 10', refValue: '$380',    art: 'b' },
-  { name: 'Vortex Foil',  grade: 'MANA 10', refValue: '$320',    art: 'd' },
-  { name: 'Radiant Base', grade: 'PSA 10',  refValue: '$180',    art: 'e' },
+  { name: 'Pikachu Illustrator',            grade: 'PSA 10',  refValue: '$5,250,000', art: 'a' },
+  { name: '1st Ed. Shadowless Charizard',   grade: 'PSA 10',  refValue: '$285,000',   art: 'c' },
+  { name: 'Base Set Blastoise Holo',        grade: 'PSA 10',  refValue: '$88,000',    art: 'b' },
+  { name: 'Umbreon Gold Star (POP 5)',      grade: 'PSA 10',  refValue: '$42,000',    art: 'd' },
+  { name: 'Base Set Venusaur Holo',         grade: 'PSA 10',  refValue: '$18,500',    art: 'e' },
+  { name: '1st Ed. Charizard (Unlimited)',  grade: 'PSA 9',   refValue: '$9,400',     art: 'a' },
+  { name: 'Charizard ex Special Art',       grade: 'PSA 10',  refValue: '$2,100',     art: 'c' },
+  { name: 'Lugia Neo Genesis Holo',         grade: 'PSA 9',   refValue: '$1,650',     art: 'b' },
+  { name: 'Mewtwo Base Set Holo',           grade: 'PSA 10',  refValue: '$780',       art: 'd' },
+  { name: 'Eevee Promo Holo',               grade: 'PSA 10',  refValue: '$320',       art: 'e' },
 ];
 
 // IPO/VAULT（募集中）。raisedUsdc は goalUsdc*pct/100 で算出（恒等式の起点）。
