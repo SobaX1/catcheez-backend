@@ -109,7 +109,32 @@ export class FundsService {
     const f = this.requireFund(ticker);
     const row = this.db.get(`SELECT proof_json, result_json FROM lottery WHERE fund_ticker=?`, [f.ticker]);
     if (!row) throw new NotFoundException('抽選結果がまだありません');
-    return { ticker: f.ticker, proof: row.proof_json ? JSON.parse(row.proof_json) : null, result: JSON.parse(row.result_json) };
+    const result = JSON.parse(row.result_json);
+    // participants 等を ticket テーブルの実数で上書き（誤解防止）。
+    // 当選枠/当選率は抽選後に確定するためここでは触れない。
+    const st = this.ticketStats(f.ticker);
+    if (result && result.meta) {
+      result.meta.participants = st.users;
+      result.meta.ticketQty = st.qty;
+      result.meta.entries = st.entries;
+      result.meta.tierBreakdown = st.breakdown;
+    }
+    return { ticker: f.ticker, proof: row.proof_json ? JSON.parse(row.proof_json) : null, result };
+  }
+
+  /** ticket テーブルからファンドの参加実数を集計（参加者数・枚数・エントリ・ティア別内訳）。 */
+  private ticketStats(ticker: string) {
+    const tot = this.db.get(
+      `SELECT COUNT(DISTINCT user_id) AS users, COALESCE(SUM(qty),0) AS qty, COALESCE(SUM(entries),0) AS entries
+       FROM ticket WHERE fund_ticker=?`, [ticker]) || { users: 0, qty: 0, entries: 0 };
+    const rows = this.db.all(
+      `SELECT tier, COALESCE(SUM(qty),0) AS qty, COALESCE(SUM(entries),0) AS entries
+       FROM ticket WHERE fund_ticker=? GROUP BY tier`, [ticker]);
+    const breakdown: Record<string, { qty: number; entries: number }> = {
+      silver: { qty: 0, entries: 0 }, gold: { qty: 0, entries: 0 }, rainbow: { qty: 0, entries: 0 },
+    };
+    rows.forEach((r: any) => { if (breakdown[r.tier]) breakdown[r.tier] = { qty: r.qty, entries: r.entries }; });
+    return { users: tot.users, qty: tot.qty, entries: tot.entries, breakdown };
   }
 
   private wallet(userId: string) {
