@@ -54,10 +54,19 @@ export class IndexerService implements OnModuleInit, OnModuleDestroy {
       this.program = program;
       this.programId = programId;
 
-      // 起動時: ファンドの PDA を補完し、現在の調達額をチェーンから読み込む
-      await this.syncFundsFromChain();
-      // 起動時: 直近の取引履歴から過去のイベント（過去の購入など）を取り込む
-      await this.indexRecentSignatures(60);
+      // 起動時の初期同期はバックグラウンドで実行（RPCがハングしても起動をブロックしない）
+      const initialSync = (async () => {
+        // ファンドの PDA を補完し、現在の調達額をチェーンから読み込む
+        await this.syncFundsFromChain();
+        // 直近の取引履歴から過去のイベント（過去の購入など）を取り込む
+        await this.indexRecentSignatures(60);
+      })();
+      const timeout = new Promise((_res, rej) =>
+        setTimeout(() => rej(new Error('initial sync timeout (20s)')), 20000));
+      Promise.race([initialSync, timeout]).then(
+        () => this.log.log('initial chain sync done'),
+        (e) => this.log.warn('initial chain sync deferred: ' + (e as Error).message),
+      );
 
       // WebSocket でも購読（届けば即時反映。届かなくてもポーリングが拾う）
       try {
