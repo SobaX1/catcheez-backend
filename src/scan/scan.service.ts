@@ -1,6 +1,8 @@
 import { HttpException, Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { DbService } from '../db/db.service';
 import { P2E_SCHEMA_SQL, P2E_DEFAULTS, P2E_MOCK_CARDS } from './scan.schema';
+import { TIERS } from '../seed/seed.data';
+import { randomUUID } from 'crypto';
 
 /**
  * Photo to Earn (P2E) — Step1: DDL適用 + GET /api/points / /api/collection（モックデータ）
@@ -91,6 +93,7 @@ export class ScanService implements OnModuleInit {
       energy: { remaining: Math.max(0, energyMax - used), max: energyMax, resets_at: this.nextJstMidnight() },
       streak_days: st?.streak_days ?? 0,
       dex: { owned: dexOwned, total: dexTotal },
+      rate_czp_per_usdc: this.cfg<number>('czp_per_usdc'),
     };
   }
 
@@ -269,6 +272,49 @@ export class ScanService implements OnModuleInit {
         total_czp: totalCzp, balance_after: bal,
       },
       energy: { remaining: Math.max(0, energyMax - used - 1), max: energyMax, resets_at: this.nextJstMidnight() },
+    };
+  }
+
+  /** POST /api/points/redeem — CZPでIPOチケットを交換（現金・USDCは動かさない） */
+  redeem(userId: string, ticker: string, tierId: string, qty: number) {
+    this.ensureSchema();
+    if (!Number.isInteger(qty) || qty < 1 || qty > 99) this.err(422, 'INVALID_QTY', 'qty は1〜99の整数');
+    const f = this.db.get(`SELECT * FROM fund WHERE ticker=?`, [String(ticker || '').toUpperCase()]);
+    if (!f) this.err(422, 'FUND_NOT_FOUND', '指定のファンドが見つかりません');
+    if (f.status !== 'open') this.err(422, 'FUND_CLOSED', `ファンドは募集中ではありません（status=${f.status}）`);
+    const tier = TIERS.find((t) => t.id === tierId);
+    if (!tier) this.err(422, 'INVALID_TIER', `不明なティア: ${tierId}`);
+
+    const rate = this.cfg<number>('czp_per_usdc');
+    const costCzp = qty * tier.price * rate;
+    const bal = this.balance(userId);
+    if (bal < costCzp) this.err(402, 'INSUFFICIENT_CZP', `CZP残高不足（必要 ${costCzp} / 残高 ${bal}）`);
+
+    const entries = qty * tier.mult;
+    const prefix = f.ticker[0];
+    const ticketNumbers = Array.from({ length: qty }, () => `${prefix}-${Math.floor(1000 + Math.random() * 8999)}`);
+    const now = new Date().toISOString();
+    const newBal = bal - costCzp;
+
+    // チケット発行（既存と同形式。paid_usdc にはUSDC換算額を記録、資金調達額には加算しない）
+    this.db.run(
+      `INSERT INTO ticket(id,user_id,fund_ticker,tier,qty,entries,paid_usdc,ticket_numbers,is_nft,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)`,
+      [randomUUID(), userId, f.ticker, tierId, qty, entries, qty * tier.price, JSON.stringify(ticketNumbers), 1, now]);
+    // CZP台帳（消費はマイナス）
+    this.db.run(
+      `INSERT INTO p2e_ledger (user_id, scan_id, kind, amount, balance_after, created_at) VALUES (?,?,?,?,?,?)`,
+      [userId, null, 'redeem', -costCzp, newBal, now]);
+    // 取引履歴（アカウント画面用。USDCは動いていないので amount=0）
+    this.db.run(
+      `INSERT INTO txn(id,user_id,type,detail,icon,amount,up,created_at) VALUES(?,?,?,?,?,?,?,?)`,
+      [randomUUID(), userId, 'チケット交換', `${f.name} · ${qty}枚（-${costCzp.toLocaleString()} CZP）`, 'buy', 0, 0, now]);
+    this.db.save?.();
+
+    return {
+      redeemed: { fund_ticker: f.ticker, fund_name: f.name, tier: tierId, tier_name: tier.name, qty, entries, ticket_numbers: ticketNumbers },
+      cost_czp: costCzp,
+      rate_czp_per_usdc: rate,
+      czp_balance: newBal,
     };
   }
 }

@@ -18,6 +18,11 @@ export class ScanController {
     return this.scan.scan(u, !!body?.demo);
   }
 
+  /** POST /api/points/redeem — CZPでIPOチケット交換 {ticker, tier, qty} */
+  @Post('points/redeem') redeem(@UserId() u: string, @Body() body: any) {
+    return this.scan.redeem(u, body?.ticker, body?.tier, Number(body?.qty));
+  }
+
   /** 開発用: デモデータ投入（冪等）。本番では ALLOW_ADMIN ガードに載せ替え予定 */
   @Post('points/seed-demo') seedDemo(@UserId() u: string) { return this.scan.seedDemo(u); }
 }

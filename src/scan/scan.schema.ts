@@ -74,6 +74,7 @@ export const P2E_DEFAULTS: Record<string, any> = {
   scan_min_interval_sec: 3, // デモ向け短縮値（spec既定は15。p2e_configで上書き可）
   grade_chance: 0.06,
   rarity_weights: { C: 42, R: 26, RR: 16, SR: 9, SAR: 5, UR: 2 },
+  czp_per_usdc: 100, // 交換レート: 100 CZP = $1（IPOチケット交換用）
 };
 
 // モックのカードマスタ（フロント v41 の P2E_DB と同一）
