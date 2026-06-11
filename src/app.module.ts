@@ -10,9 +10,10 @@ import { MeModule } from './me/me.module';
 import { MiscModule } from './misc/misc.module';
 import { SchedulerModule } from './scheduler/scheduler.module';
 import { IndexerModule } from './indexer/indexer.module';
+import { ScanModule } from './scan/scan.module';
 
 @Module({
-  imports: [DbModule, AppJwtModule, AuthModule, FundsModule, TokensModule, MeModule, MiscModule, SchedulerModule, IndexerModule],
+  imports: [DbModule, AppJwtModule, AuthModule, FundsModule, TokensModule, MeModule, MiscModule, SchedulerModule, IndexerModule, ScanModule],
   controllers: [AppController],
 })
 export class AppModule implements NestModule {
