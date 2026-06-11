@@ -10,15 +10,26 @@ import { P2E_SCHEMA_SQL, P2E_DEFAULTS, P2E_MOCK_CARDS } from './scan.schema';
 export class ScanService implements OnModuleInit {
   constructor(private readonly db: DbService) {}
 
+  private schemaReady = false;
+
   onModuleInit() {
-    // DDL適用（DbService.onModuleInit 完了後に呼ばれる）
-    // 注意: DbService.run は params 付きで sql.js の prepare 経路に入るため
+    // 起動を絶対にブロックしない（失敗しても初回リクエスト時に ensureSchema で再試行）
+    try { this.ensureSchema(); } catch (e: any) {
+      Logger.warn('P2E schema init deferred: ' + (e?.message || e), 'ScanService');
+    }
+  }
+
+  /** DDL適用＋マスタ投入（冪等・遅延初期化）。各エンドポイント先頭から呼ばれる。 */
+  private ensureSchema() {
+    if (this.schemaReady) return;
+    // DbService.run は params 付きで sql.js の prepare 経路に入るため
     // 複数文を一括実行できない。文単位に分割して適用する。
     for (const stmt of P2E_SCHEMA_SQL.split(';')) {
       if (stmt.trim()) this.db.run(stmt);
     }
     this.seedMockMaster();
     this.db.save?.();
+    this.schemaReady = true;
     Logger.log('P2E schema ready', 'ScanService');
   }
 
@@ -64,6 +75,7 @@ export class ScanService implements OnModuleInit {
 
   /** GET /api/points */
   points(userId: string) {
+    this.ensureSchema();
     const energyMax = this.cfg<number>('energy_max');
     const today = this.jstDay();
     const used = this.db.get(
@@ -84,6 +96,7 @@ export class ScanService implements OnModuleInit {
 
   /** GET /api/points/ledger */
   ledger(userId: string, limit = 30) {
+    this.ensureSchema();
     const rows = this.db.all(
       `SELECT l.id, l.scan_id, l.kind, l.amount, l.balance_after, l.created_at,
               s.card_id, s.rank, m.name_ja, m.rarity
@@ -98,6 +111,7 @@ export class ScanService implements OnModuleInit {
 
   /** GET /api/collection — マスタ全件＋所持状況（未所持は locked 表示用） */
   collection(userId: string) {
+    this.ensureSchema();
     const rows = this.db.all(
       `SELECT m.card_id, m.game, m.name_ja, m.set_code, m.set_name, m.card_number, m.rarity, m.price_jpy,
               COALESCE(u.count, 0) AS owned_count, u.first_scan
@@ -117,6 +131,7 @@ export class ScanService implements OnModuleInit {
 
   /** デモ用シード（任意・冪等）: demo-user に2枚所持＋台帳を作る */
   seedDemo(userId: string) {
+    this.ensureSchema();
     if (this.db.get(`SELECT 1 AS x FROM p2e_ledger WHERE user_id=? LIMIT 1`, [userId])) return { seeded: false };
     const now = new Date().toISOString();
     const grant = (scanId: string, cardId: string, rank: string, czp: number, bal: number) => {
@@ -152,6 +167,7 @@ export class ScanService implements OnModuleInit {
 
   /** POST /api/scan — SCAN_MODE=mock: 画像は使わずモック判定（spec §3〜§5） */
   scan(userId: string, _demo: boolean) {
+    this.ensureSchema();
     const mode = process.env.SCAN_MODE || 'mock';
     if (mode !== 'mock') this.err(503, 'RECOGNITION_UNAVAILABLE', 'live モードは未実装です（Step3で対応）');
 
