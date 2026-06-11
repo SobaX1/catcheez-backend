@@ -75,6 +75,8 @@ export const P2E_DEFAULTS: Record<string, any> = {
   grade_chance: 0.06,
   rarity_weights: { C: 42, R: 26, RR: 16, SR: 9, SAR: 5, UR: 2 },
   czp_per_usdc: 100, // 交換レート: 100 CZP = $1（IPOチケット交換用）
+  phash_hamming_max: 8,  // これ以下のハミング距離は同一画像とみなす
+  phash_window_days: 30, // 重複判定の対象期間
 };
 
 // モックのカードマスタ（フロント v41 の P2E_DB と同一）

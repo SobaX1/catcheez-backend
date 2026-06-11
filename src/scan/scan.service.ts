@@ -168,8 +168,31 @@ export class ScanService implements OnModuleInit {
     )?.n ?? 0;
   }
 
+  /** dHash(64bit): 9x8グレースケールの隣接画素比較。16進16文字を返す */
+  private async dhash(imageB64: string): Promise<string> {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const Jimp = require('jimp');
+    const buf = Buffer.from(imageB64.replace(/^data:image\/\w+;base64,/, ''), 'base64');
+    const img = await Jimp.read(buf);
+    img.resize(9, 8).grayscale();
+    let bits = '';
+    for (let y = 0; y < 8; y++) for (let x = 0; x < 8; x++) {
+      const a = Jimp.intToRGBA(img.getPixelColor(x, y)).r;
+      const b = Jimp.intToRGBA(img.getPixelColor(x + 1, y)).r;
+      bits += a < b ? '1' : '0';
+    }
+    return BigInt('0b' + bits).toString(16).padStart(16, '0');
+  }
+
+  private hamming(aHex: string, bHex: string): number {
+    let x = BigInt('0x' + aHex) ^ BigInt('0x' + bHex);
+    let n = 0;
+    while (x) { n += Number(x & 1n); x >>= 1n; }
+    return n;
+  }
+
   /** POST /api/scan — SCAN_MODE=mock: 画像は使わずモック判定（spec §3〜§5） */
-  scan(userId: string, _demo: boolean) {
+  async scan(userId: string, _demo: boolean, imageB64?: string) {
     this.ensureSchema();
     const mode = process.env.SCAN_MODE || 'mock';
     if (mode !== 'mock') this.err(503, 'RECOGNITION_UNAVAILABLE', 'live モードは未実装です（Step3で対応）');
@@ -184,6 +207,23 @@ export class ScanService implements OnModuleInit {
       [userId]);
     if (last && Date.now() - Date.parse(last.created_at) < minInt * 1000)
       this.err(429, 'RATE_LIMITED', 'スキャン間隔が短すぎます');
+
+    // --- pHash重複検知（実カメラ撮影時のみ。デモスキャンは画像なし） ---
+    let phash: string | null = null;
+    if (imageB64) {
+      try { phash = await this.dhash(imageB64); }
+      catch { this.err(422, 'CARD_NOT_DETECTED', '画像を読み取れませんでした。撮り直してください'); }
+      const maxDist = this.cfg<number>('phash_hamming_max');
+      const days = this.cfg<number>('phash_window_days');
+      const since = new Date(Date.now() - days * 864e5).toISOString();
+      const rows = this.db.all(
+        `SELECT phash FROM p2e_scan WHERE user_id=? AND phash IS NOT NULL AND created_at>=? ORDER BY created_at DESC LIMIT 400`,
+        [userId, since]);
+      for (const r of rows) {
+        if (this.hamming(phash!, r.phash) <= maxDist)
+          this.err(409, 'DUPLICATE_IMAGE', '同じ写真は使用できません。カードを撮り直してください');
+      }
+    }
 
     // --- モック判定: レアリティ重み付き抽選 → カード選択 ---
     const weights = this.cfg<Record<string, number>>('rarity_weights');
@@ -227,10 +267,10 @@ export class ScanService implements OnModuleInit {
     const now = new Date().toISOString();
     const scanId = 'scn_' + now.replace(/\D/g, '').slice(0, 14) + '_' + Math.random().toString(36).slice(2, 8);
     this.db.run(
-      `INSERT INTO p2e_scan (id, user_id, card_id, status, is_slab, grading_co, grade, cert_number, cert_verified,
+      `INSERT INTO p2e_scan (id, user_id, card_id, status, phash, is_slab, grading_co, grade, cert_number, cert_verified,
         price_jpy, price_source, rank, czp_awarded, flags, created_at)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-      [scanId, userId, card.card_id, 'completed', graded ? 1 : 0, graded ? 'PSA' : null, graded ? '10' : null,
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      [scanId, userId, card.card_id, 'completed', phash, graded ? 1 : 0, graded ? 'PSA' : null, graded ? '10' : null,
        certNumber, graded ? 1 : null, card.price_jpy, 'mock', rank, totalCzp, '[]', now]);
     this.db.run(
       `INSERT INTO p2e_user_card (user_id, card_id, count, first_scan) VALUES (?,?,1,?)

@@ -15,7 +15,7 @@ export class ScanController {
 
   /** POST /api/scan — mockモード（画像不要。{demo:true} などのJSONを受理） */
   @Post('scan') postScan(@UserId() u: string, @Body() body: any) {
-    return this.scan.scan(u, !!body?.demo);
+    return this.scan.scan(u, !!body?.demo, typeof body?.image === 'string' && body.image.length > 50 ? body.image : undefined);
   }
 
   /** POST /api/points/redeem — CZPでIPOチケット交換 {ticker, tier, qty} */
