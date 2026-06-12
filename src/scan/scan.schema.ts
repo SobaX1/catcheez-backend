@@ -59,6 +59,15 @@ CREATE TABLE IF NOT EXISTS p2e_config (
   k TEXT PRIMARY KEY,
   v TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS p2e_ref_code (
+  user_id TEXT PRIMARY KEY,
+  code    TEXT UNIQUE NOT NULL
+);
+CREATE TABLE IF NOT EXISTS p2e_ref_use (
+  referred_id TEXT PRIMARY KEY,
+  referrer_id TEXT NOT NULL,
+  created_at  TEXT NOT NULL
+);
 `;
 
 // 付与ランク等の既定値（p2e_config 未設定時のフォールバック）
@@ -77,7 +86,30 @@ export const P2E_DEFAULTS: Record<string, any> = {
   czp_per_usdc: 100, // 交換レート: 100 CZP = $1（IPOチケット交換用）
   phash_hamming_max: 8,  // これ以下のハミング距離は同一画像とみなす
   phash_window_days: 30, // 重複判定の対象期間
+  ref_reward_referrer: 50,     // 紹介した側のCZPボーナス
+  ref_reward_referred: 25,     // 紹介された側のCZPボーナス
 };
+
+// ランク制度（LP準拠・シーズン制）。refs=null は紹介条件なし
+export const P2E_RANKS: { nm: string; b: string; col: string; apps: number; refs: number | null; pct: number; perk: string }[] = [
+  { nm: 'Rookie', b: 'R', col: '#c9c4b8', apps: 0,   refs: null, pct: 0,  perk: '基本機能' },
+  { nm: 'Bronze', b: 'B', col: '#c0763a', apps: 5,   refs: null, pct: 5,  perk: 'ブロンズバッジNFT' },
+  { nm: 'Silver', b: 'S', col: '#9aa3ad', apps: 20,  refs: 3,    pct: 15, perk: '限定ファンド参加権' },
+  { nm: 'Gold',   b: 'G', col: '#ffb300', apps: 50,  refs: 10,   pct: 30, perk: 'Discord VIP' },
+  { nm: 'Master', b: 'M', col: '#c46bd6', apps: 100, refs: 30,   pct: 50, perk: 'マスター特典フル解放' },
+];
+
+export function rankIndexFor(apps: number, refs: number): number {
+  let idx = 0;
+  for (let i = 0; i < P2E_RANKS.length; i++) {
+    const r = P2E_RANKS[i];
+    if (apps >= r.apps || (r.refs != null && refs >= r.refs)) idx = i;
+  }
+  return idx;
+}
+export function rankBonusFor(apps: number, refs: number): number {
+  return P2E_RANKS[rankIndexFor(apps, refs)].pct / 100;
+}
 
 // モックのカードマスタ（フロント v41 の P2E_DB と同一）
 export const P2E_MOCK_CARDS = [

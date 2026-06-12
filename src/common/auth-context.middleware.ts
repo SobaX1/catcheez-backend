@@ -22,6 +22,11 @@ export class AuthContextMiddleware implements NestMiddleware {
         /* 無効トークン → demo にフォールバック */
       }
     }
+    // JWTなし時: クライアント発行のゲストID（端末単位の軽量ユーザー分離）
+    if (userId === DEMO_USER.id) {
+      const gid = req.headers?.['x-guest-id'];
+      if (typeof gid === 'string' && /^[0-9a-zA-Z-]{8,40}$/.test(gid)) userId = 'g_' + gid;
+    }
     req.userId = userId;
     next();
   }

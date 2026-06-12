@@ -23,6 +23,17 @@ export class ScanController {
     return this.scan.redeem(u, body?.ticker, body?.tier, Number(body?.qty));
   }
 
+  /** GET /api/referral — 紹介コード・応募数・紹介数 */
+  @Get('referral') referral(@UserId() u: string) { return this.scan.referral(u); }
+
+  /** POST /api/referral/claim — 紹介コード適用 {code} */
+  @Post('referral/claim') claimRef(@UserId() u: string, @Body() body: any) {
+    return this.scan.claimReferral(u, body?.code);
+  }
+
+  /** GET /api/rank — 応募数・紹介数とランク、紹介コードを返す */
+  @Get('rank') rank(@UserId() u: string) { return this.scan.rank(u); }
+
   /** 開発用: デモデータ投入（冪等）。本番では ALLOW_ADMIN ガードに載せ替え予定 */
   @Post('points/seed-demo') seedDemo(@UserId() u: string) { return this.scan.seedDemo(u); }
 }

@@ -357,5 +357,80 @@ export class ScanService implements OnModuleInit {
       czp_balance: newBal,
     };
   }
-}
 
+  /** 紹介コードを取得（無ければ発行）し、応募数・紹介数を返す */
+  referral(userId: string) {
+    this.ensureSchema();
+    let row = this.db.get(`SELECT code FROM p2e_ref_code WHERE user_id=?`, [userId]);
+    if (!row) {
+      let code = '';
+      for (let tries = 0; tries < 10; tries++) {
+        code = Math.random().toString(36).slice(2, 8).toUpperCase();
+        if (!this.db.get(`SELECT 1 AS x FROM p2e_ref_code WHERE code=?`, [code])) break;
+      }
+      this.db.run(`INSERT INTO p2e_ref_code (user_id, code) VALUES (?,?)`, [userId, code]);
+      this.db.save?.();
+      row = { code };
+    }
+    const apps = this.db.get(`SELECT COALESCE(SUM(qty),0) AS n FROM ticket WHERE user_id=?`, [userId])?.n ?? 0;
+    const refs = this.db.get(`SELECT COUNT(*) AS n FROM p2e_ref_use WHERE referrer_id=?`, [userId])?.n ?? 0;
+    const referredBy = this.db.get(`SELECT referrer_id FROM p2e_ref_use WHERE referred_id=?`, [userId]);
+    return { code: row.code, applications: apps, referrals: refs, referred: !!referredBy };
+  }
+
+  /** 紹介コードを適用（1ユーザー1回・自己紹介不可）。双方にCZP付与 */
+  claimReferral(userId: string, code: string) {
+    this.ensureSchema();
+    const c = String(code || '').trim().toUpperCase();
+    if (!c) this.err(422, 'INVALID_CODE', '紹介コードが空です');
+    const owner = this.db.get(`SELECT user_id FROM p2e_ref_code WHERE code=?`, [c]);
+    if (!owner) this.err(422, 'INVALID_CODE', '無効な紹介コードです');
+    if (owner.user_id === userId) this.err(422, 'SELF_REFERRAL', '自分の紹介コードは使えません');
+    if (this.db.get(`SELECT 1 AS x FROM p2e_ref_use WHERE referred_id=?`, [userId]))
+      this.err(409, 'ALREADY_REFERRED', '紹介コードは既に適用済みです');
+
+    const now = new Date().toISOString();
+    const rReferrer = this.cfg<number>('ref_reward_referrer');
+    const rReferred = this.cfg<number>('ref_reward_referred');
+    this.db.run(`INSERT INTO p2e_ref_use (referred_id, referrer_id, created_at) VALUES (?,?,?)`,
+      [userId, owner.user_id, now]);
+    const balA = this.balance(owner.user_id) + rReferrer;
+    this.db.run(`INSERT INTO p2e_ledger (user_id, scan_id, kind, amount, balance_after, created_at) VALUES (?,?,?,?,?,?)`,
+      [owner.user_id, null, 'referral', rReferrer, balA, now]);
+    const balB = this.balance(userId) + rReferred;
+    this.db.run(`INSERT INTO p2e_ledger (user_id, scan_id, kind, amount, balance_after, created_at) VALUES (?,?,?,?,?,?)`,
+      [userId, null, 'referral_bonus', rReferred, balB, now]);
+    this.db.save?.();
+    return { applied: true, bonus_czp: rReferred, referrer_reward: rReferrer, czp_balance: balB };
+  }
+
+
+  /** GET /api/rank — 応募数(累計チケット)・紹介数からランク判定 */
+  rank(userId: string) {
+    this.ensureSchema();
+    const RANKS = [
+      { key: 'rookie', nm: 'Rookie', mult: 0,  perk: '基本機能',             apps: 0,   refs: null as number | null },
+      { key: 'bronze', nm: 'Bronze', mult: 5,  perk: 'ブロンズバッジNFT',     apps: 5,   refs: null as number | null },
+      { key: 'silver', nm: 'Silver', mult: 15, perk: '限定ファンド参加権',    apps: 20,  refs: 3 as number | null },
+      { key: 'gold',   nm: 'Gold',   mult: 30, perk: 'Discord VIP',          apps: 50,  refs: 10 as number | null },
+      { key: 'master', nm: 'Master', mult: 50, perk: 'マスター特典フル解放', apps: 100, refs: 30 as number | null },
+    ];
+    const apps = this.db.get(`SELECT COALESCE(SUM(qty),0) AS n FROM ticket WHERE user_id=?`, [userId])?.n ?? 0;
+    const refs = this.db.get(`SELECT COUNT(*) AS n FROM p2e_ref_use WHERE referrer_id=?`, [userId])?.n ?? 0;
+    let cur = RANKS[0];
+    for (const r of RANKS) if (apps >= r.apps || (r.refs != null && refs >= r.refs)) cur = r;
+    const idx = RANKS.indexOf(cur);
+    const next = idx < RANKS.length - 1 ? RANKS[idx + 1] : null;
+    let progress: any = null;
+    if (next) {
+      const pa = Math.min(1, apps / next.apps);
+      const pr = next.refs != null ? Math.min(1, refs / next.refs) : 0;
+      progress = { name: next.nm, apps_need: next.apps, refs_need: next.refs, pct: Math.round(Math.max(pa, pr) * 100) };
+    }
+    return {
+      apps, referrals: refs,
+      rank: { key: cur.key, name: cur.nm, mult: '+' + cur.mult + '%', perk: cur.perk },
+      next: progress,
+    };
+  }
+}
