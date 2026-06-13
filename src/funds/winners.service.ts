@@ -50,7 +50,7 @@ export class WinnersService {
         [f.ticker, w.owner, w.entries, JSON.stringify(ws.proofs[w.owner]), ws.rootHex, new Date().toISOString()],
       );
     }
-    // ===== ハズレ特典: 非当選者にCZP還元＋ボーナスチケット =====
+    // ===== ハズレ特典: 非当選者にCZP還元（案4: ボーナスチケットは廃止）=====
     const consolation = this.grantConsolation(f, winners.map((w) => w.owner));
 
     return { ticker: f.ticker, root: ws.rootHex, winnerCount: winners.length, slots: Number(slots), consolation };
@@ -76,8 +76,8 @@ export class WinnersService {
 
   /**
    * 非当選の参加者に「ハズレ特典」を配布する。
-   * - CZP還元: 支払ったチケット相当の一部をCZPで返す（p2e_ledger に記録）
-   * - ボーナスチケット: 次回応募に使えるチケットを1枚付与（is_nft=0 の特典チケット）
+   * - CZP還元: 支払ったチケット代の一部をCZPで返す（p2e_ledger に記録）
+   * - 応募ポイント（ランク進捗）は応募時点で既に加算済みのため、ここでは追加しない
    * 冪等性: 同 fund で既に consolation 済みなら二重付与しない。
    */
   private grantConsolation(f: any, winnerWallets: string[]) {
@@ -100,7 +100,6 @@ export class WinnersService {
     };
     const refundPct = cfg('consolation_czp_pct', 0.5);   // 支払USDCの何割をCZP換算で返すか
     const czpPerUsdc = cfg('czp_per_usdc', 100);          // 1USDc=何CZP
-    const bonusTickets = cfg('consolation_bonus_tickets', 1);
 
     let granted = 0;
     for (const r of rows) {
@@ -121,16 +120,9 @@ export class WinnersService {
           `INSERT INTO p2e_ledger (user_id, scan_id, kind, amount, balance_after, created_at) VALUES (?,?,?,?,?,?)`,
           [uid, 'ipo:' + f.ticker, 'consolation', czp, bal, now]);
       }
-      // 2) ボーナスチケット（次回応募用・無償。entries はゴールド相当の素点1）
-      if (bonusTickets > 0) {
-        this.db.run(
-          `INSERT INTO ticket(id,user_id,fund_ticker,tier,qty,entries,paid_usdc,ticket_numbers,is_nft,created_at)
-           VALUES(?,?,?,?,?,?,?,?,?,?)`,
-          [randomUUID(), uid, f.ticker, 'bonus', bonusTickets, bonusTickets, 0, JSON.stringify([]), 0, now]);
-      }
       granted++;
     }
     this.db.save?.();
-    return { losers: granted, refundPct, czpPerUsdc, bonusTickets };
+    return { losers: granted, refundPct, czpPerUsdc };
   }
 }
