@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto';
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { DbService } from '../db/db.service';
 import { selectWinners, buildWinnerSet, hexProofToBytes, Participant } from './merkle';
@@ -49,7 +50,10 @@ export class WinnersService {
         [f.ticker, w.owner, w.entries, JSON.stringify(ws.proofs[w.owner]), ws.rootHex, new Date().toISOString()],
       );
     }
-    return { ticker: f.ticker, root: ws.rootHex, winnerCount: winners.length, slots: Number(slots) };
+    // ===== ハズレ特典: 非当選者にCZP還元＋ボーナスチケット =====
+    const consolation = this.grantConsolation(f, winners.map((w) => w.owner));
+
+    return { ticker: f.ticker, root: ws.rootHex, winnerCount: winners.length, slots: Number(slots), consolation };
   }
 
   /** フロントが叩く：owner が当選者なら proof（number[][]）を返す。非当選は won:false。 */
@@ -68,5 +72,65 @@ export class WinnersService {
       root: row.root_hex,
       proof: hexProofToBytes(JSON.parse(row.proof_json)),
     };
+  }
+
+  /**
+   * 非当選の参加者に「ハズレ特典」を配布する。
+   * - CZP還元: 支払ったチケット相当の一部をCZPで返す（p2e_ledger に記録）
+   * - ボーナスチケット: 次回応募に使えるチケットを1枚付与（is_nft=0 の特典チケット）
+   * 冪等性: 同 fund で既に consolation 済みなら二重付与しない。
+   */
+  private grantConsolation(f: any, winnerWallets: string[]) {
+    const winnerSet = new Set(winnerWallets.map((w) => String(w)));
+    // 参加者を user 単位で取得（支払額の集計のため ticket を直接参照）
+    const rows = this.db.all(
+      `SELECT t.user_id, u.wallet,
+              SUM(t.qty) qty, SUM(t.paid_usdc) paid
+         FROM ticket t JOIN app_user u ON u.id=t.user_id
+        WHERE t.fund_ticker=? COLLATE NOCASE AND u.wallet IS NOT NULL AND u.wallet<>''
+        GROUP BY t.user_id`,
+      [f.ticker],
+    );
+    const now = new Date().toISOString();
+    // 設定値（p2e_config 経由。無ければ既定）
+    const cfg = (k: string, d: number) => {
+      const r = this.db.get(`SELECT v FROM p2e_config WHERE k=?`, [k]);
+      if (r?.v != null) { const n = Number(JSON.parse(r.v)); return isNaN(n) ? d : n; }
+      return d;
+    };
+    const refundPct = cfg('consolation_czp_pct', 0.5);   // 支払USDCの何割をCZP換算で返すか
+    const czpPerUsdc = cfg('czp_per_usdc', 100);          // 1USDc=何CZP
+    const bonusTickets = cfg('consolation_bonus_tickets', 1);
+
+    let granted = 0;
+    for (const r of rows) {
+      if (winnerSet.has(String(r.wallet))) continue; // 当選者は対象外
+      const uid = r.user_id;
+      // 冪等: この fund のこの user に consolation 済みなら skip
+      const done = this.db.get(
+        `SELECT 1 x FROM p2e_ledger WHERE user_id=? AND kind='consolation' AND scan_id=? LIMIT 1`,
+        [uid, 'ipo:' + f.ticker]);
+      if (done) continue;
+
+      // 1) CZP還元
+      const czp = Math.max(0, Math.round((r.paid || 0) * refundPct * czpPerUsdc));
+      if (czp > 0) {
+        const bal = (this.db.get(
+          `SELECT balance_after b FROM p2e_ledger WHERE user_id=? ORDER BY id DESC LIMIT 1`, [uid])?.b ?? 0) + czp;
+        this.db.run(
+          `INSERT INTO p2e_ledger (user_id, scan_id, kind, amount, balance_after, created_at) VALUES (?,?,?,?,?,?)`,
+          [uid, 'ipo:' + f.ticker, 'consolation', czp, bal, now]);
+      }
+      // 2) ボーナスチケット（次回応募用・無償。entries はゴールド相当の素点1）
+      if (bonusTickets > 0) {
+        this.db.run(
+          `INSERT INTO ticket(id,user_id,fund_ticker,tier,qty,entries,paid_usdc,ticket_numbers,is_nft,created_at)
+           VALUES(?,?,?,?,?,?,?,?,?,?)`,
+          [randomUUID(), uid, f.ticker, 'bonus', bonusTickets, bonusTickets, 0, JSON.stringify([]), 0, now]);
+      }
+      granted++;
+    }
+    this.db.save?.();
+    return { losers: granted, refundPct, czpPerUsdc, bonusTickets };
   }
 }
